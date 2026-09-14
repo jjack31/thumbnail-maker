@@ -413,6 +413,34 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   #centerArea #cropHintText{position:static;margin-top:8px;font-size:11px!important;}
   .rh{width:44px;height:44px;}#saveDialog input,#saveDialog select{font-size:16px!important;}
 }
+/* ==================== 문의하기 버튼 및 창 ==================== */
+.contact-fab{position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:99px;background:#2670D9;border:0;box-shadow:0 8px 24px rgba(38,112,217,.35);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:9999;}
+.contact-fab svg{width:24px;height:24px;}
+.contact-overlay{position:fixed;inset:0;background:rgba(32,36,58,.32);display:none;align-items:center;justify-content:center;z-index:10000;}
+.contact-overlay.open{display:flex;}
+.contact-window{display:flex;flex-direction:column;align-items:flex-start;width:400px;max-width:92vw;max-height:88vh;background:#FFFFFF;box-shadow:0 20px 60px -8px rgba(32,36,58,.180392);border-radius:20px;overflow:hidden;font-family:Pretendard,-apple-system,sans-serif;}
+.contact-header{display:flex;flex-direction:row;align-items:center;padding:0 20px;gap:12px;width:100%;height:88px;flex:none;box-sizing:border-box;}
+.contact-icon-badge{display:flex;justify-content:center;align-items:center;width:44px;height:44px;background:#EDF5FF;border-radius:99px;flex:none;}
+.contact-icon-badge svg{width:24px;height:24px;}
+.contact-title-area{display:flex;flex-direction:column;align-items:flex-start;gap:4px;flex:1;min-width:0;}
+.contact-title-area h2{margin:0;font:600 22px/130% Pretendard,sans-serif;color:#1F1F23;}
+.contact-close{display:flex;justify-content:center;align-items:center;width:36px;height:36px;background:#F6F7FA;border:0;border-radius:999px;cursor:pointer;flex:none;}
+.contact-close svg{width:20px;height:20px;}
+.contact-divider{width:100%;height:1px;background:#E3E6ED;flex:none;}
+.contact-body{display:flex;flex-direction:column;align-items:flex-start;padding:24px;gap:20px;width:100%;box-sizing:border-box;overflow-y:auto;}
+.contact-intro h3{margin:0 0 4px;font:600 16px/140% Pretendard,sans-serif;color:#1F1F23;}
+.contact-intro p{margin:0;font:400 12px/140% Pretendard,sans-serif;color:#6B665E;}
+.contact-fields{display:flex;flex-direction:column;align-items:flex-start;gap:16px;width:100%;}
+.contact-field{display:flex;flex-direction:column;align-items:flex-start;gap:8px;width:100%;}
+.contact-field label{font:400 13px/16px Pretendard,sans-serif;color:#171A22;}
+.contact-field input,.contact-field textarea{box-sizing:border-box;width:100%;padding:10px 14px;background:#FFFFFF;border:1px solid #D9D9DE;border-radius:4px;font:400 16px/150% Pretendard,sans-serif;color:#1F1F23;resize:none;}
+.contact-field textarea{height:156px;}
+.contact-field input::placeholder,.contact-field textarea::placeholder{color:#999999;}
+.contact-send-row{display:flex;flex-direction:row;justify-content:flex-end;align-items:center;width:100%;}
+.contact-send-btn{display:flex;flex-direction:row;justify-content:center;align-items:center;padding:10px 20px;gap:6px;height:37px;background:#2670D9;border:0;border-radius:8px;font:600 14px/17px Pretendard,sans-serif;color:#FFFFFF;cursor:pointer;}
+.contact-send-btn:disabled{opacity:.6;cursor:not-allowed;}
+.contact-status{font:400 12px/140% Pretendard,sans-serif;color:#6B665E;min-height:16px;}
+.contact-status.error{color:#D33;}
 </style>
 </head>
 <body>
@@ -682,38 +710,49 @@ window.jobStatus=(()=>{
 <!-- ==================== 배경 제거 스크립트 ==================== -->
 <!-- 동적 텍스트 수정 구간: 배경 제거 처리 상태와 오류 메시지 -->
 <script>
-let backgroundRemovalModule;
+let birefnetWorker, birefnetReady=false, birefnetPending=null;
+const birefnetWorkerCode="\nlet model,processor,RawImage;\nself.onmessage=async({data:m})=>{\ntry{\n if(m.type==='load'){\n  const t=performance.now();\n  const lib=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js');\n  RawImage=lib.RawImage;lib.env.allowLocalModels=false;\n  lib.env.backends.onnx.wasm.numThreads=1;\n  const id='onnx-community/BiRefNet-ONNX';\n  const options={device:m.device,dtype:'fp32',progress_callback:p=>self.postMessage({type:'progress',file:p.file,status:p.status,progress:p.progress})};\n  model=await lib.AutoModel.from_pretrained(id,options);\n  processor=await lib.AutoProcessor.from_pretrained(id);\n  self.postMessage({type:'ready',seconds:(performance.now()-t)/1000,device:m.device});\n }else if(m.type==='run'){\n  const t=performance.now();const url=URL.createObjectURL(m.file);\n  try{\n   const original=await RawImage.fromURL(url);\n   if(original.width*original.height>16000000)throw new Error('1,600만 화소 이하로 줄여 주세요.');\n   const image=original.clone().rgb();\n   const {pixel_values}=await processor(image);\n   const {output_image}=await model({input_image:pixel_values});\n   if(!output_image)throw new Error('모델 출력 형식이 예상과 다릅니다.');\n   const mask=await RawImage.fromTensor(output_image[0].sigmoid().mul(255).to('uint8')).resize(original.width,original.height);\n   const rgba=original.rgba();\n   for(let i=0;i<original.width*original.height;i++)rgba.data[i*4+3]=Math.round(rgba.data[i*4+3]*mask.data[i*mask.channels]/255);\n   const canvas=new OffscreenCanvas(original.width,original.height);\n   canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba.data),original.width,original.height),0,0);\n   const blob=await canvas.convertToBlob({type:'image/png'});\n   self.postMessage({type:'result',blob,width:original.width,height:original.height,seconds:(performance.now()-t)/1000});\n  }finally{URL.revokeObjectURL(url);}\n }\n}catch(e){self.postMessage({type:'error',message:e.message||String(e),phase:m.type});}\n};";
+function startBirefnetWorker(){
+  const url=URL.createObjectURL(new Blob([birefnetWorkerCode],{type:'text/javascript'}));
+  birefnetWorker=new Worker(url,{type:'module'});URL.revokeObjectURL(url);
+  birefnetWorker.onmessage=({data:d})=>{
+    if(d.type==='progress'){
+      window.jobStatus.update('배경 제거 준비 중… 모델 다운로드');
+      if(Number.isFinite(d.progress))window.jobStatus.progress(Math.round(d.progress));
+    }else if(d.type==='ready'){
+      birefnetReady=true;const p=birefnetPending;birefnetPending=null;p?.resolve();
+    }else if(d.type==='result'){
+      const p=birefnetPending;birefnetPending=null;p?.resolve(d.blob);
+    }else if(d.type==='error'){
+      const p=birefnetPending;birefnetPending=null;
+      if(d.phase==='load'){birefnetWorker.terminate();birefnetWorker=null;birefnetReady=false;}
+      p?.reject(new Error('BiRefNet 배경 제거 실패: '+d.message));
+    }
+  };
+  birefnetWorker.onerror=e=>{
+    const p=birefnetPending;birefnetPending=null;birefnetReady=false;
+    birefnetWorker?.terminate();birefnetWorker=null;
+    p?.reject(new Error('배경 제거 도구 실행 실패: '+(e.message||'인터넷 연결과 브라우저를 확인해 주세요.')));
+  };
+}
+function birefnetRequest(message){
+  return new Promise((resolve,reject)=>{birefnetPending={resolve,reject};birefnetWorker.postMessage(message);});
+}
 window.__removeBg=async function(source){
-  const button=document.getElementById('fbRemoveBg');
-  const show=message=>{if(button)button.textContent=message;window.jobStatus.update(message);};
-  show('배경 제거 준비 중…');
-  if(!backgroundRemovalModule){
-    backgroundRemovalModule=import('https://esm.sh/@imgly/background-removal@1.5.5?bundle').catch(error=>{
-      backgroundRemovalModule=null;
-      throw new Error('배경 제거 도구를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.');
-    });
-  }
-  const {removeBackground}=await backgroundRemovalModule;
+  if(birefnetPending)throw new Error('다른 이미지 처리 중입니다. 완료 후 다시 눌러 주세요.');
+  window.jobStatus.update('배경 제거 준비 중…');
   const response=await fetch(source);
-  if(!response.ok)throw new Error('선택한 이미지를 읽지 못했습니다. 이미지를 다시 올려 주세요.');
+  if(!response.ok)throw new Error('선택한 이미지를 읽지 못했습니다.');
   const input=await response.blob();
-  let blob;
-  try{
-    blob=await removeBackground(input,{
-      publicPath:'https://staticimgly.com/@imgly/background-removal-data/1.5.5/dist/',
-      device:'cpu',model:'medium',proxyToWorker:false,
-      output:{format:'image/png'},
-      progress:(key,current,total)=>{
-        if(key.startsWith('fetch:')){show('배경 제거 준비 중…');window.jobStatus.progress(total?Math.round(current/total*100):0);} 
-        else show('배경 제거 중…');
-      }
-    });
-  }catch(error){
-    console.error('Background removal failed',error);
-    throw new Error('배경 제거를 완료하지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.\n상세: '+(error.message||String(error)));
-  }
+  if(input.size>20*1024*1024)throw new Error('이미지는 20MB 이하로 올려 주세요.');
+  if(!birefnetWorker)startBirefnetWorker();
+  if(!birefnetReady)await birefnetRequest({type:'load',device:'wasm'});
+  window.jobStatus.update('배경 제거 중…');
+  const blob=await birefnetRequest({type:'run',file:input});
   return await new Promise((resolve,reject)=>{
-    const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('결과 이미지를 읽지 못했습니다.'));reader.readAsDataURL(blob);
+    const reader=new FileReader();reader.onload=()=>resolve(reader.result);
+    reader.onerror=()=>reject(new Error('결과 이미지를 읽지 못했습니다.'));
+    reader.readAsDataURL(blob);
   });
 };
 </script>
@@ -1519,11 +1558,7 @@ $('fbRemoveBg').onclick=async()=>{
   const button=$('fbRemoveBg');button.disabled=true;window.jobStatus.start('배경 제거 중…');
   try{
     const source=await backgroundSource(target,isGift);
-    // Always use the AI model. The fast solid-color path was removed:
-    // color-distance flood fill cannot reliably separate a white/cream
-    // product from a white background, and it doesn't generalize well to
-    // cast shadows either. The AI model uses learned shape cues instead of
-    // raw color distance, so it handles both cases far more reliably.
+    // BiRefNet runs locally in the browser worker.
     const resultSrc=await window.__removeBg(source);
     const alreadyTransparent=false;
     const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(new Error('결과 이미지를 읽지 못했습니다.'));im.src=resultSrc;});
@@ -1887,6 +1922,119 @@ try{
 syncSet();rQty();applyZoom();render();ph();
 let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{applyZoom();},100);});
 
+})();
+</script>
+
+<!-- ==================== 문의하기 버튼 및 창 ==================== -->
+<!-- 문의하기 플로팅 버튼: 화면 우하단 고정 -->
+<button type="button" class="contact-fab" id="contactFab" aria-label="문의하기" title="문의하기">
+  <svg viewBox="0 0 24 25" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <path d="M3 5.5C3 4.39543 3.89543 3.5 5 3.5H19C20.1046 3.5 21 4.39543 21 5.5V17.5C21 18.6046 20.1046 19.5 19 19.5H5C3.89543 19.5 3 18.6046 3 17.5V5.5Z" stroke="#FFFFFF" stroke-width="1.6"/>
+    <path d="M4 6L12 12.5L20 6" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</button>
+
+<div class="contact-overlay" id="contactOverlay">
+  <div class="contact-window" role="dialog" aria-modal="true" aria-labelledby="contactTitle">
+    <div class="contact-header">
+      <div class="contact-icon-badge">
+        <svg viewBox="0 0 24 25" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M3 5.5C3 4.39543 3.89543 3.5 5 3.5H19C20.1046 3.5 21 4.39543 21 5.5V17.5C21 18.6046 20.1046 19.5 19 19.5H5C3.89543 19.5 3 18.6046 3 17.5V5.5Z" stroke="#2670D9" stroke-width="1.6"/>
+          <path d="M4 6L12 12.5L20 6" stroke="#2670D9" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="contact-title-area">
+        <h2 id="contactTitle">문의하기</h2>
+      </div>
+      <button type="button" class="contact-close" id="contactClose" aria-label="닫기">
+        <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M5 5L15 15M15 5L5 15" stroke="#1F1F23" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="contact-divider"></div>
+    <div class="contact-body">
+      <div class="contact-intro">
+        <h3>무엇을 도와드릴까요?</h3>
+        <p>오류나 궁금한 점을 남겨주시면 확인 후 답변드릴게요.</p>
+      </div>
+      <div class="contact-fields">
+        <div class="contact-field">
+          <label for="contactName">이름</label>
+          <input type="text" id="contactName" placeholder="이름을 입력해주세요"/>
+        </div>
+        <div class="contact-field">
+          <label for="contactMessage">메시지</label>
+          <textarea id="contactMessage" placeholder="어떤 문제가 있었는지, 어느 화면에서 발생했는지 알려주세요"></textarea>
+        </div>
+      </div>
+      <div class="contact-send-row">
+        <button type="button" class="contact-send-btn" id="contactSendBtn">전송</button>
+      </div>
+      <p class="contact-status" id="contactStatus">&nbsp;</p>
+    </div>
+  </div>
+</div>
+<!-- Google Forms로 조용히 전송하기 위한 숨김 iframe -->
+<iframe name="contactSubmitFrame" id="contactSubmitFrame" style="display:none;" title="문의 전송"></iframe>
+
+<script>
+(function(){
+  // ⚠️ 아래 3개 값을 실제 Google Form 정보로 바꿔주세요.
+  // 1) FORM_ACTION_URL: Form 편집 화면 URL에서 /viewform 을 /formResponse 로 바꾼 값
+  //    예: https://docs.google.com/forms/d/e/1FAIpQLSxxxxxxx/formResponse
+  // 2) ENTRY_NAME, ENTRY_MESSAGE: '미리 채운 링크 가져오기'로 얻은 URL 안의 entry.숫자 값
+  const FORM_ACTION_URL='https://docs.google.com/forms/d/e/1FAIpQLSdH0tknv_WHUHL-TOl1Slt4IkCWB6gaw5VO9EOu2oAR7kRANw/formResponse';
+  const ENTRY_NAME='entry.1972609303';
+  const ENTRY_MESSAGE='entry.1253511031';
+
+  const $=id=>document.getElementById(id);
+  const fab=$('contactFab'),overlay=$('contactOverlay'),closeBtn=$('contactClose');
+  const nameInput=$('contactName'),messageInput=$('contactMessage');
+  const sendBtn=$('contactSendBtn'),statusEl=$('contactStatus');
+
+  function setStatus(text,isError){statusEl.textContent=text||'\u00a0';statusEl.classList.toggle('error',!!isError);}
+  function openModal(){overlay.classList.add('open');setStatus('');nameInput.focus();}
+  function closeModal(){overlay.classList.remove('open');}
+
+  fab.addEventListener('click',openModal);
+  closeBtn.addEventListener('click',closeModal);
+  overlay.addEventListener('click',e=>{if(e.target===overlay)closeModal();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&overlay.classList.contains('open'))closeModal();});
+
+  sendBtn.addEventListener('click',()=>{
+    const name=nameInput.value.trim();
+    const message=messageInput.value.trim();
+    if(!message){setStatus('메시지를 입력해주세요.',true);return;}
+    if(FORM_ACTION_URL.includes('여기에_FORM_ID')){
+      setStatus('Google Form 연결이 아직 설정되지 않았어요. (개발자에게 문의)',true);
+      return;
+    }
+    sendBtn.disabled=true;setStatus('전송 중…');
+
+    // Google Forms로 페이지 이동 없이 백그라운드 전송 (숨김 iframe target)
+    const form=document.createElement('form');
+    form.action=FORM_ACTION_URL;form.method='POST';form.target='contactSubmitFrame';
+
+    const nameField=document.createElement('input');
+    nameField.type='hidden';nameField.name=ENTRY_NAME;nameField.value=name||'(이름 미입력)';
+    const msgField=document.createElement('input');
+    msgField.type='hidden';msgField.name=ENTRY_MESSAGE;msgField.value=message;
+
+    form.appendChild(nameField);form.appendChild(msgField);
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+
+    // Google Forms 응답은 교차 출처(iframe)라 성공 여부를 직접 확인할 수 없어,
+    // 잠시 대기 후 완료로 안내합니다.
+    setTimeout(()=>{
+      sendBtn.disabled=false;
+      setStatus('문의가 접수되었습니다. 감사합니다!');
+      nameInput.value='';messageInput.value='';
+      setTimeout(closeModal,1200);
+    },700);
+  });
 })();
 </script>
 </body>
